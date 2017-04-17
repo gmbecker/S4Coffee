@@ -1,0 +1,263 @@
+---
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{S4Coffee}
+  %\VignetteEngine{knitr::rmarkdown}
+  \usepackage[utf8]{inputenc}
+---
+
+# S4Coffee: generating S4 classes and methods automatically from code and comments
+
+## Introduction
+
+The S4Coffee package allows users to declare S4 classes, S4 generics (with
+default methods) and S4 methods via roxygen-style comments (Danenberg and Eugster,
+Wickham et al.)
+
+It also provides functionality for automatically generated so-called "accessor"
+functions, i.e., getter and setter functions, for slots on S4 classes from
+the class definition.
+
+
+## Installation
+
+S4Coffee is currently only available on Github in a development version.
+
+It can be installed via `devtools` or `switchr`
+
+```{r devtools,eval=FALSE}
+library(devtools)
+install_github("gmbecker/S4Coffee")
+```
+
+or
+
+```{r switchr,eval=FALSE}
+library(switchr)
+man = GithubManifest("gmbecker/S4Coffee")
+install_packages("S4Coffee", man)
+```
+
+
+## Declaring classes, generics, and methods
+
+S4Coffee directives look exactly like roxygen2 directives, except that they
+begin with `##^` rather than the traditional `##'.`
+
+### classes
+
+Classes are declared via the "class" roxygen-like directive, with the
+slot, slotDefault, and contains methods being largely self-explanatory.
+
+The one important detail about the slot directive is that after the slot name,
+it expects the slot class before the description, which is arguably advisable but
+not required when using roxygen comments to document a slot.
+
+We can define a simple class, then, like so
+
+```{r classdef}
+##^ @class myclass
+##^ @slot a numeric
+##^ @slot b character
+##^ @slotDefault a 5L
+##^ @slotDefault b "whaaaat"
+##^ @accessors ALL
+NULL
+```
+
+Note we indicate the end of the comment with NULL.
+
+The accessors directive indicates which slots should have accessors (getter and
+setter functions) created for them. `ALL` indicates all slots should receive
+getters, `ALL<-` indicates all slots should receive getters and setters.
+Otherwise, accessors are declared slot-wise, via the pattern `funname:slotname`
+to generate only getters with the name `funname` for the slot `slotname`, or
+`funname:slotname<-` to do the same but also generate a `funname<-` setter
+which sets the slot. 
+
+S4Coffee also supports the `@contains` directive, which declares inheritence. 
+
+### generics
+
+S4 Generics are declared via the `@generic` directive, followed by ither
+what we are calling a function declaration (the function signature with `NULL` as
+the body, or by the desired default method in cases where a `@defaultMethod`
+directive is present.:
+
+```{r generic1, eval=FALSE}
+##^ @generic mygeneric
+function(x, y = 5L, z, ...) NULL
+```
+
+or
+
+```{r generic2, eval=FALSE}
+##^ @generic diffgeneric
+##^ @defaultMethod
+function(x, y = 5L, z, ...) sum(y)
+```
+
+When there is no `@defaultMethod` directive, the `NULL` in the generic declaration
+is automatically replaced with a `standardGeneric` call in the generated generic
+declaration.
+
+
+### methods
+
+Methods are declared with the `@method` directive, with `sigType` directives
+specifying the type-signature of the method (one directive per parameter
+in the type signature), like so
+
+```{r method, eval=FALSE}
+##^ @method mygeneric
+##^ @sigType x integer
+##^ @sigType y numeric
+function(x,y, z, ...) sum(y*x)
+
+
+## Parsing files
+
+The parse_file function parses a file (or character string, in fact) containing
+these comments and generates an S4RecipeList containing S4Recipe objects for
+each S4Coffee comment block.
+
+```{r parse}
+library(S4Coffee)
+recips = parse_file(system.file("examples/simpleclass.R", package="S4Coffee"))
+recips[[1]]
+```
+
+## Generating code
+ We generate code from recipes via the `genCode` function:
+
+```{r gencode}
+code = genCode(recips)
+code[[1]]
+```
+
+
+# Legacy accessor generation API for existing classes
+
+S4Coffee also offers a legacy API for generating accessor code for classes
+which already exist, via the makeAccessors and write_accessors functions.
+
+makeAccessors accepts the name or class definition object of an existing
+class, and generates a ClassAccessors object, while write_accessors accepts
+ClassAccessors objects, along with the file to write to, and writes the
+generated code.
+
+Note: this legacy code is used under-the-hood when handling the `@accessors`
+directive described above.
+
+
+
+```{r legacy}
+setClass("a", representation(a = "integer", b="numeric", c = "ANY"))
+acs = makeAccessors("a")
+thing = character()
+con = textConnection("thing", "w", local=TRUE)
+write_accessors(acs, con, splash="", append=TRUE)
+close(con)
+thing
+```
+
+# A worked example
+
+Here we will define a simple class and methods which operate on it. We will define
+a csvdf class, which will extend data.frame with slots for storing the
+file it was read from and an in-meory representation of any header information
+in the CSV file. We note that this is a toy example and more care would
+need to go into the design of a production version of this class. 
+
+
+Note we only ask for header and csvfile getters and setters currently, rather
+than ALL, because the S4 class representing data.frame has a "names" slot which
+causes problems with the generated code because it is implicit. Future versions
+will handle this issue more automatically.
+
+```{r csvdf}
+##^ @class csvdf
+##^ @contains data.frame
+##^ @slot header ANY 
+##^ @slot csvfile character
+##^ @accessors header<- csvfile<-
+NULL
+
+make_csvdf = function(file) {
+    df = read.csv(file, comment.char = "#")
+    lines = readLines(file)
+    hstop = min(grep("^#", lines, invert=TRUE) )-1
+    if(hstop>0)
+	header = lines[1:hstop]
+    else
+	header = character()
+    new("csvdf", df, header = header, csvfile = file)
+}
+
+##^ @method show
+##^ @sigType object csvdf
+function(object) {
+    cat("A CSV-derived data.frame with ", length(header(object)),
+        " lines of header information\n",
+	"\tfile: ", csvfile(object), "\n",
+	"head:\n")
+    print.data.frame(head(object))
+}
+```
+
+Here we do some trickery to have our generated classes and methods
+available while knitting this vignette.  You don't need to worry
+about this, but I will leave it visible for completeness.
+
+```{r trickery_abounds}
+
+library(S4Coffee)
+library(knitr)
+opts =options(knitr.duplicate.label="allow")
+tangled = tempfile(fileext = ".R")
+purl("S4Coffee.Rmd", output = tangled)
+options(opts)
+parsed = parse_file(tangled)
+gened = tempfile(fileext=".R")
+writeCode(parsed, outfile = gened, append=FALSE)
+eval(parse(gened), envir = knit_global())
+```
+
+
+
+
+```{r usethem}
+tmpfile  = tempfile(fileext=".csv")
+cat("# dataset:iris\n# source: R\n", file = tmpfile)
+write.table(iris, file = tmpfile, append=TRUE, sep=",")
+
+thing = make_csvdf(tmpfile)
+print(class(thing))
+## we need the explicit show call here because apparently kntir (or evaluate?)
+## doesn't respect show methods.
+show(thing)
+```
+
+
+
+# Licensing and ownership of generated code
+
+Code generated via S4Coffee is owned and copyright the user of our package,
+and can be licensed in the manner of their choosing.
+
+We request that our users not remove the notice at the top of files generated
+by S4Coffee when distributing those files publicly.
+
+# Acknowledgement
+
+
+We further ask that S4Coffee and its authors be acknowledged, in whatever manner
+is appropriate for the setting, when users publish about R pacakges for which
+S4Coffee played a substantial role in development.
+
+A citation for S4Coffee can be obtained by calling
+
+```{r citation}
+citation(package="S4Coffee")
+```
+

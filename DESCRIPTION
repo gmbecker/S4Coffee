@@ -1,0 +1,16 @@
+Package: S4Coffee
+Type: Package
+Title: Tools for generating S4 classes and methods
+Version: 0.2.4
+Author: Gabriel Becker[aut,cre]
+Maintainer: Gabriel Becker <becker.gabriel@gene.com>
+Copyright: Genentech Inc
+Description: Tools for generating S4 classes, generics, and methods from
+	     roxygen2-like comments, and for automatically generating accessor
+	     methods for their slots. 
+Imports: brew, methods, roxygen2
+Suggests: knitr
+VignetteBuilder:knitr
+License: Artistic-2.0
+RoxygenNote: 6.0.1
+Date: 2017-03-07
